@@ -22,7 +22,7 @@ class Reranker:
 
     def rerank(self, query: str, candidates: List[Dict[str, str]]) -> List[Dict[str, float]]:
         """
-        Rerank the candidates based on relevance to the query.
+        Rerank candidates based on relevance to the query.
         :param query: The query text.
         :param candidates: A list of candidate documents (chunks).
         :return: A list of candidates with relevance scores.
@@ -34,11 +34,20 @@ class Reranker:
             t5_input = self.format_to_t5_query(query, candidate["text"])
             inputs = self.tokenizer(t5_input, return_tensors="pt", max_length=512, truncation=True)
 
-            # Generate relevance score (use max_new_tokens to avoid max_length issues)
-            with torch.no_grad():  # Disable gradient computation for inference
-                outputs = self.model.generate(**inputs, max_new_tokens=5)  # Generate up to 5 new tokens
-                relevance_score = float(self.tokenizer.decode(outputs[0], skip_special_tokens=True))
+            # Generate textual classification (e.g., "true"/"false")
+            with torch.no_grad():
+                outputs = self.model.generate(**inputs, max_new_tokens=1)
+                prediction = self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip().lower()
 
+            # Map "true"/"false" to numeric scores
+            if prediction == "true":
+                relevance_score = 1.0
+            elif prediction == "false":
+                relevance_score = 0.0
+            else:
+                relevance_score = 0.5  # Default to a neutral score for unexpected outputs
+
+            # Append result with relevance score
             reranked_results.append({**candidate, "relevance_score": relevance_score})
 
         # Sort candidates by relevance score
