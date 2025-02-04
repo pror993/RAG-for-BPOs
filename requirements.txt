@@ -1,5 +1,8 @@
 pymilvus
 sentence-transformers
-dotenv
+python-dotenv
 PyPDF2
 langchain
+tiktoken
+transformers
+sentencepiece
