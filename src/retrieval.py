@@ -1,81 +1,124 @@
-from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Collection
+from pymilvus import connections, Collection
+from sklearn.feature_extraction.text import TfidfVectorizer
+import os
+from dotenv import load_dotenv
 import json
+import numpy as np
 
 
-class MilvusDB:
-    def __init__(self, uri: str, api_key: str, cluster_name: str = "default"):
+# Load environment variables
+load_dotenv()
+
+class HybridRetriever:
+    def __init__(self, collection_name="document_embeddings"):
         """
-        Initialize connection to Milvus Cloud.
-        :param uri: Milvus public endpoint
-        :param api_key: Milvus Cloud API key
-        :param cluster_name: Collection alias (default: "default")
+        Initialize Hybrid Retrieval with BM25 and Milvus vector search.
         """
+        self.collection_name = collection_name
+        self.vectorizer = TfidfVectorizer()  # BM25 approximation
+
+        # Connect to Milvus
+        uri = os.getenv("MILVUS_PUBLIC_ENDPOINT")
+        api_key = os.getenv("MILVUS_API_KEY")
+        print(f"Connecting to Milvus at {uri}...")
         connections.connect(
-            alias=cluster_name,
+            alias="default",
             uri=uri,
-            token=api_key,  # Use your Milvus Cloud API Key
+            token=api_key
         )
-        self.collection_name = "document_embeddings"
 
-    def create_collection(self):
-        """
-        Create Milvus collection with schema for storing embeddings.
-        """
-        fields = [
-            FieldSchema(name="chunk_id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=384),  # Use 384 dimensions for MiniLM
-        ]
-        schema = CollectionSchema(fields, "Document Embeddings")
-        Collection(self.collection_name, schema)
+        # Check connection and load collection
+        self.collection = self._load_collection()
 
-    def insert_embeddings(self, embeddings_file: str):
-        """
-        Insert precomputed embeddings into the Milvus collection.
-        """
-        with open(embeddings_file, "r") as f:
-            data = json.load(f)
+        # Load chunk metadata for BM25
+        with open("./embeddings/embeddings.json", "r") as f:
+            self.chunk_metadata = json.load(f)
+        self.chunks = [metadata["chunk_file"] for metadata in self.chunk_metadata]
 
-        collection = Collection(self.collection_name)
-        collection.load()  # Load collection into memory
+        # Fit BM25 vectorizer on chunk text
+        print("Fitting BM25 vectorizer...")
+        chunk_texts = [self.read_chunk_text(chunk_file) for chunk_file in self.chunks]
+        self.vectorizer.fit(chunk_texts)
 
-        vectors = [item["embedding"] for item in data]
-        chunk_ids = [i for i in range(len(vectors))]
-
-        # Insert into Milvus
-        collection.insert([chunk_ids, vectors])
-        print(f"Inserted {len(vectors)} vectors into Milvus.")
-
-    def query_vectors(self, query_embedding, top_k: int = 5):
+    def _load_collection(self):
         """
-        Perform vector search on the Milvus collection.
+        Load a collection from Milvus. Raises an exception if the collection doesn't exist.
         """
-        collection = Collection(self.collection_name)
-        collection.load()
-        search_params = {"nprobe": 10}  # Milvus search parameter
-        results = collection.search(
+        try:
+            collection = Collection(self.collection_name)
+            collection.load()
+            print(f"Collection '{self.collection_name}' loaded successfully.")
+            return collection
+        except Exception as e:
+            print(f"Error loading collection '{self.collection_name}': {e}")
+            raise e
+
+    def read_chunk_text(self, chunk_file):
+        """
+        Read the text of a chunk from the processed_chunks folder.
+        """
+        with open(f"./processed_chunks/{chunk_file}", "r") as f:
+            return f.read()
+    def bm25_search(self, query, top_k=5):
+        """
+        Perform BM25 keyword-based retrieval.
+        """
+        query_vector = self.vectorizer.transform([query])
+        chunk_vectors = self.vectorizer.transform([self.read_chunk_text(c) for c in self.chunks])
+
+        # Compute scores as dot product
+        scores = (chunk_vectors @ query_vector.T).toarray().flatten()
+        ranked_indices = np.argsort(scores)[::-1][:top_k]
+        return [{"chunk_file": self.chunks[i], "bm25_score": scores[i]} for i in ranked_indices]
+
+    def vector_search(self, query_embedding, top_k=5):
+        """
+        Perform vector similarity search using Milvus.
+        """
+        search_params = {"nprobe": 10}
+        results = self.collection.search(
             data=[query_embedding],
             anns_field="embedding",
             param=search_params,
             limit=top_k,
         )
-        return results
+        return [{"chunk_id": result.id, "distance": result.distance} for result in results[0]]
+
+    def retrieve(self, query, query_embedding, top_k=5):
+        """
+        Perform hybrid retrieval: BM25 + Vector Search.
+        """
+        print("Performing BM25 search...")
+        bm25_results = self.bm25_search(query, top_k)
+
+        print("Performing vector similarity search...")
+        vector_results = self.vector_search(query_embedding, top_k)
+
+        # Combine results (you can customize this combination logic)
+        combined_results = {
+            "bm25_results": bm25_results,
+            "vector_results": vector_results,
+        }
+        return combined_results
 
 
-# Example: Create collection, insert embeddings, and query
+# Example Usage
 if __name__ == "__main__":
-    uri = "https://in03-2c3b8bd41a90c08.serverless.gcp-us-west1.cloud.zilliz.com"
-    api_key = "f65478fc22acefefdb96955662fcbe5aa470a9d64e847d59b86a296f8fec1e54da5be7704857c10afcafe7a5eb9d106d947e6857"  # Replace with your actual API key
-    db = MilvusDB(uri, api_key)
+    # Initialize HybridRetriever
+    retriever = HybridRetriever()
 
-    # Step 1: Create a collection in Milvus Cloud
-    db.create_collection()
+    # Example query
+    query = "What documents are required for a health insurance claim?"
+    query_embedding = [0.1] * 384  # Replace with the actual query embedding
 
-    # Step 2: Insert embeddings into Milvus
-    embeddings_file = "./embeddings/embeddings.json"  # Path to your generated embeddings file
-    db.insert_embeddings(embeddings_file)
+    # Perform hybrid retrieval
+    results = retriever.retrieve(query, query_embedding, top_k=5)
 
-    # Step 3: Query embeddings
-    dummy_query_embedding = [0.1] * 384  # Replace with a real query embedding
-    results = db.query_vectors(dummy_query_embedding)
-    for result in results[0]:
-        print(f"Found: {result.id}, Distance: {result.distance}")
+    # Display results
+    print("\nBM25 Results:")
+    for r in results["bm25_results"]:
+        print(f"Chunk: {r['chunk_file']}, BM25 Score: {r['bm25_score']}")
+
+    print("\nVector Results:")
+    for r in results["vector_results"]:
+        print(f"Chunk ID: {r['chunk_id']}, Distance: {r['distance']}")
