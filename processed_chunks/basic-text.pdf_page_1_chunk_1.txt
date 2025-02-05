@@ -1,0 +1,18 @@
+Sample Document for PDF T esting
+Introduction
+This is a simple document created to test basic PDF functionality . It includes various text formatting
+options to ensure proper rendering in PDF readers.
+Text Formatting Examples
+1. Bold text  is used for emphasis.
+2. Italic text  can be used for titles or subtle emphasis.
+3. Strikethrough  is used to show deleted text.
+Lists
+Here's an example of an unordered list:
+Item 1
+Item 2
+Item 3
+And here's an ordered list:
+1. First item
+2. Second item
+3. Third item
+Quote
