@@ -48,3 +48,33 @@ if __name__ == "__main__":
     print("\nFinal Results:")
     for result in results:
         print(f"Chunk: {result['chunk_file']}, Relevance Score: {result['relevance_score']}, Text: {result['text']}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
