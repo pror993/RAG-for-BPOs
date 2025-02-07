@@ -6,3 +6,5 @@ langchain
 tiktoken
 transformers
 sentencepiece
+uvicorn
+fastapi

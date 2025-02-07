@@ -1,7 +1,11 @@
-from retrieval import HybridRetriever
+import sys
+import os
+
+# Add the src/ directory to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
+
+from retrieval import HybridRetriever  # Now it should work
 from reranking import Reranker
-
-
 class RAGPipeline:
     def __init__(self):
         """
